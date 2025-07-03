@@ -1,0 +1,27 @@
+name: morpheus
+channels:
+  - xformers
+  - pytorch3d
+  - pytorch
+  - nvidia/label/cuda-11.8.0
+  - conda-forge
+  - nvidia
+dependencies:
+  - cmake==3.22.3
+  - gxx==11.4
+  - cuda==11.8.0
+  - ninja==1.11.1
+  - eigen==3.4.0
+  - pytorch3d=0.7.7=py310_cu118_pyt212
+  - python==3.10.14
+  - pytorch==2.1.2
+  - pytorch-cuda==11.8
+  - cudatoolkit==11.8
+  - cuda-runtime=11.8.0
+  - setuptools==69.5.1
+  - numpy<2
+  - torchvision==0.16.2
+  - ffmpeg
+  - x264==1!161.3030
+  - xformers==0.0.23.post1
+  - libgl==1.7.0

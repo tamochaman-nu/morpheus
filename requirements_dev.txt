@@ -1,0 +1,5 @@
+black==22.12.0
+isort==5.10.1
+build==0.10.0
+pytest==8.4.0
+setuptools==69.5.1 # avoids: https://stackoverflow.com/questions/78604018/importerror-cannot-import-name-packaging-from-pkg-resources-when-trying-to
