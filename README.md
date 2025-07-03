@@ -11,6 +11,8 @@ An autoregressive 3D Gaussian Splatting stylization method, using a RGBD diffusi
 > 
 > [Paper, CVPR 2025 (arXiv pdf)](https://arxiv.org/abs/2503.02009), [Project Page](https://nianticlabs.github.io/morpheus/)
 
+https://github.com/user-attachments/assets/28c47146-1486-41fe-b02a-8fee278779f9
+
 ## Table of Contents
 
 - [Morpheus: Text-Driven 3D Gaussian Splat Shape and Color Stylization](#morpheus-text-driven-3d-gaussian-splat-shape-and-color-stylization)
