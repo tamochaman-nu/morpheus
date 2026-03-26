@@ -83,6 +83,54 @@ input data, prompts, and hyperparameters. Example:
 python -m morpheus.pipeline --config-path ./data/configs/fangzhou/a_photo_of_a_human_skeleton.yaml
 ```
 
+## 🐳 Running with Docker
+
+We provide a Docker environment to easily set up the project with all its dependencies and GPU support.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/)
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (for GPU support)
+
+### Setup and Run
+
+1. **Build the Docker image:**
+
+   ```bash
+   docker compose build
+   ```
+
+2. **Run the container:**
+
+   ```bash
+   docker compose run --rm morpheus
+   ```
+
+   This will drop you into a bash shell inside the container with the `morpheus` mamba environment already activated.
+
+3. **Verify GPU access (inside the container):**
+
+   ```bash
+   python -c "import torch; print(f'GPU Available: {torch.cuda.is_available()}')"
+   ```
+
+4. **Download data if you haven't already:**
+
+   ```bash
+   make download-models
+   make download-input-data
+   ```
+
+5. **Run the pipeline:**
+
+   ```bash
+   python -m morpheus.pipeline --config-path ./data/configs/fangzhou/a_photo_of_a_human_skeleton.yaml
+   ```
+
+### Troubleshooting
+
+If you encounter issues with GPU access, ensure the NVIDIA Container Toolkit is correctly installed and configured.
+
 ## 📖 Pipeline CLI reference
 
 The Morpheus pipeline can be configured using command-line arguments or YAML configuration files. Here's a comprehensive list of all available options:
