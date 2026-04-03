@@ -91,6 +91,9 @@ class XAttnWarpRGBDControlNet:
             torch_dtype=torch.float32,
         ).to("cuda")
 
+        # Memory optimizations for high resolution
+        self.pipe.enable_attention_slicing()
+
         self.guidance_rescale = guidance_rescale
 
         logger.debug(
@@ -426,4 +429,6 @@ class XAttnWarpRGBDControlNet:
         depth_normed = depth_normed.repeat(1, 3, 1, 1)
 
         # Have to call private function :(
-        return self.pipe._encode_vae_image(depth_normed.to(self.pipe.device), generator=generator)
+        return self.pipe._encode_vae_image(
+            depth_normed.to(device=self.pipe.device), generator=generator
+        )

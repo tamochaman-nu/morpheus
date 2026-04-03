@@ -17,7 +17,7 @@ from morpheus.p_frame_generation import PFrameGenerator
 from morpheus.point_cloud import ResplattingPointCloud
 from morpheus.utils.geometry_utils import ForwardWarp, NormalGenerator
 from morpheus.utils.mesh_utils import MeshWarp
-from morpheus.utils.nerfstudio import (
+from morpheus.utils.ns_utils import (
     generate_transform_json,
     run_regsplatfacto,
     save_depth_for_regsplatfacto,

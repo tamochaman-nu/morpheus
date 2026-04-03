@@ -9,54 +9,82 @@ from morpheus.utils.mesh_utils import MeshWarp
 
 
 def compute_attn_allkv(
-    attn, query, key, value, video_length, attention_mask, extra_attn_mult=None, self_attn_value=1.0
+    attn, query, key, value, video_length, attention_mask, extra_attn_mult=None, self_attn_value=1.0, chunk_size: int = 1024
 ):
     """
     Takes queries from the frame to be generated and does attention between those and keys/values
     drawn from all frames, both ref and non-ref.
     query: (BxF_non_ref, D_q, C)
-        Tokens of the target frames we are generating/decoding.
     key / value: (BxF_total, D_kv, C)
-        Key & value tokens of both the reference and non-reference frames.
-    extra_attn_mult: (F_ref, D_kv, D_q)
-        Controls the strength of the attention between keys of each reference frame and the target frame.
-        This is how we can inject information about geometry into the attention operation.
-        In the limit self_attn_value -> infinity, there is no interaction with ref frames.
     """
 
     d_query = query.shape[1]
 
     # The new matrices must be catted along the f-dimension
-    # Current shape is (num_refs, N, N)
     if extra_attn_mult is not None:
         extra_attn_mult = rearrange(extra_attn_mult, "r k q -> (r k) q")
-
-        # extra_attn_mult currently only gives values to modulate the cross attention with the ref frames,
-        # but we also have a self-attention part between the non-ref frames. So we augment
         self_attn_mult = torch.full(
             (d_query, d_query), self_attn_value, device=extra_attn_mult.device
         )
         extra_attn_mult = torch.cat([extra_attn_mult, self_attn_mult], dim=0)
 
-    # Now flatten K and V across all frames into one long sequence that we will do cross-attention with:
-    # (B×F_total, D_kv, C) -> (B, F_total×D_kv, C):
+    # Flatten K and V
     key = rearrange(key, "(b f) d c -> b (f d) c", f=video_length)
     value = rearrange(value, "(b f) d c -> b (f d) c", f=video_length)
 
     key = attn.head_to_batch_dim(key)
     value = attn.head_to_batch_dim(value)
-    # Get softmax(Q^T K / scale) for all keys:
-    attention_probs = get_attention_scores(
-        query,
-        key,
-        attention_mask,
-        upcast_attention=attn.upcast_attention,
-        upcast_softmax=attn.upcast_softmax,
-        scale=attn.scale,
-        extra_attn_mult=extra_attn_mult,
-    )
-    # Right-mult by V to get the output hidden states:
-    return torch.bmm(attention_probs, value)
+    
+    scale = attn.scale
+    dtype = query.dtype
+    
+    if attn.upcast_attention:
+        query = query.float()
+        key = key.float()
+        
+    num_queries = query.shape[1]
+    out_hidden_states = torch.zeros(query.shape[0], query.shape[1], value.shape[2], dtype=dtype, device=query.device)
+
+    # Apply slicing to prevent materializing the full (query_len x key_len) attention matrix
+    for i in range(0, num_queries, chunk_size):
+        query_chunk = query[:, i : i + chunk_size, :]
+        
+        if attention_mask is None:
+            baddbmm_input = torch.empty(
+                query_chunk.shape[0], query_chunk.shape[1], key.shape[1], dtype=query_chunk.dtype, device=query_chunk.device
+            )
+            beta = 0
+        else:
+            baddbmm_input = attention_mask[:, i : i + chunk_size, :]
+            beta = 1
+
+        attention_scores = torch.baddbmm(
+            baddbmm_input,
+            query_chunk,
+            key.transpose(-1, -2),
+            beta=beta,
+            alpha=scale,
+        )
+        del baddbmm_input
+
+        if attn.upcast_softmax:
+            attention_scores = attention_scores.float()
+
+        if extra_attn_mult is not None:
+            extra_attn_shift = torch.log(extra_attn_mult)
+            shift_chunk = extra_attn_shift.transpose(0, 1)[i : i + chunk_size, :]
+            attention_scores = attention_scores + shift_chunk[None, ...]
+
+        attention_probs = attention_scores.softmax(dim=-1)
+        del attention_scores
+
+        attention_probs = attention_probs.to(value.dtype)
+        
+        # Multiply by V for the current chunk
+        out_hidden_states[:, i : i + chunk_size, :] = torch.bmm(attention_probs, value)
+        del attention_probs
+
+    return out_hidden_states
 
 
 def get_attention_scores(
@@ -67,57 +95,36 @@ def get_attention_scores(
     upcast_softmax: bool = False,
     scale: float = 1.0,
     extra_attn_mult=None,
+    chunk_size: int = 1024,
 ) -> torch.Tensor:
-    r"""
-    Compute the attention scores.
-
-    Args:
-        query (`torch.Tensor`): The query tensor. Shape (batch_size, query_len, hidden_size)
-        key (`torch.Tensor`): The key tensor; shape (batch_size, key_len, hidden_size)
-        attention_mask (`torch.Tensor`, *optional*): The attention mask to use. If `None`, no mask is applied.
-
-    Returns:
-        `torch.Tensor`: The attention probabilities/scores.
-    """
+    # This is now only a fallback or utility, most logic moved to compute_attn_allkv for memory efficiency
     dtype = query.dtype
     if upcast_attention:
         query = query.float()
         key = key.float()
 
-    if attention_mask is None:
-        baddbmm_input = torch.empty(
-            query.shape[0], query.shape[1], key.shape[1], dtype=query.dtype, device=query.device
-        )
-        beta = 0
-    else:
-        baddbmm_input = attention_mask
-        beta = 1
+    num_queries = query.shape[1]
+    all_attention_probs = []
 
-    attention_scores = torch.baddbmm(
-        baddbmm_input,
-        query,
-        key.transpose(-1, -2),
-        beta=beta,
-        alpha=scale,
-    )
-    del baddbmm_input
+    for i in range(0, num_queries, chunk_size):
+        query_chunk = query[:, i : i + chunk_size, :]
+        if attention_mask is None:
+            baddbmm_input = torch.empty(query_chunk.shape[0], query_chunk.shape[1], key.shape[1], dtype=query_chunk.dtype, device=query_chunk.device)
+            beta = 0
+        else:
+            baddbmm_input = attention_mask[:, i : i + chunk_size, :]
+            beta = 1
 
-    if upcast_softmax:
-        attention_scores = attention_scores.float()
+        attention_scores = torch.baddbmm(baddbmm_input, query_chunk, key.transpose(-1, -2), beta=beta, alpha=scale)
+        if upcast_softmax: attention_scores = attention_scores.float()
+        if extra_attn_mult is not None:
+            extra_attn_shift = torch.log(extra_attn_mult)
+            shift_chunk = extra_attn_shift.transpose(0, 1)[i : i + chunk_size, :]
+            attention_scores = attention_scores + shift_chunk[None, ...]
+        attention_probs = attention_scores.softmax(dim=-1).to(dtype)
+        all_attention_probs.append(attention_probs)
 
-    # Multiply in extra attention map if provided
-    if extra_attn_mult is not None:
-        extra_attn_shift = torch.log(extra_attn_mult)
-
-        # Transpose because extra mult is structured as (key, query) but we want to multiply it by the scores (query, key)
-        attention_scores = attention_scores + extra_attn_shift.transpose(0, 1)[None, ...]
-
-    attention_probs = attention_scores.softmax(dim=-1)
-    del attention_scores
-
-    attention_probs = attention_probs.to(dtype)
-
-    return attention_probs
+    return torch.cat(all_attention_probs, dim=1)
 
 
 class AutoregressiveCrossAttentionProcessor:
@@ -198,27 +205,49 @@ class AutoregressiveCrossAttentionProcessor:
         query = attn.head_to_batch_dim(query_pre_reshape)
 
         if not is_cross_attention_with_prompt:
-            ################## Perform self attention
+            ################## Perform self attention (with slicing to prevent OOM)
             key_self = attn.head_to_batch_dim(key)
             value_self = attn.head_to_batch_dim(value)
-            attention_probs = attn.get_attention_scores(query, key_self, attention_mask)
-            hidden_states_self = torch.bmm(attention_probs, value_self)
+            
+            # Sliced self-attention
+            chunk_size = 1024
+            num_queries = query.shape[1]
+            hidden_states_self = torch.zeros(query.shape[0], query.shape[1], value_self.shape[2], dtype=query.dtype, device=query.device)
+            
+            for i in range(0, num_queries, chunk_size):
+                query_chunk = query[:, i : i + chunk_size, :]
+                mask_chunk = attention_mask[:, i : i + chunk_size, :] if attention_mask is not None else None
+                
+                # Use simplified slicing for self-attention
+                probs_chunk = get_attention_scores(
+                    query_chunk, key_self, mask_chunk, 
+                    upcast_attention=attn.upcast_attention, 
+                    upcast_softmax=attn.upcast_softmax, 
+                    scale=attn.scale
+                )
+                hidden_states_self[:, i : i + chunk_size, :] = torch.bmm(probs_chunk, value_self)
+                del probs_chunk
             #######################################
 
             video_length = key.size(0) // self.unet_num_chunks
+            num_tokens = hidden_states_self.shape[-2]
 
             # The deeper layers of the UNet operate at lower resolution. Our reference latents
             # are at the original stable diffusion latent resolution (which is itself (H/8, W/8) in
             # terms of the original image resolution). So we need to downscale our reference latents
             # to match the current layer's resolution.
-            # We will discover what that resolution is by inspecting the hidden states we got in as
-            # input.
-            assert self.ref_latents is not None, "Must have reference latents to do xattn with!"
-            ref_latent_height = self.ref_latents[0].shape[-2]
-            # The -2 axis of the hidden states is the flattened spatial axis, i.e. it is of size
-            # (H * W). We use square crops so we can take the square root to get the height and
-            # width.
-            latent_height = int(round(hidden_states_self.shape[-2] ** 0.5))
+            # For non-square images, we use the aspect ratio from the attention maps.
+            if self.extra_attention_maps is not None:
+                _, ref_h, ref_w, tgt_h, tgt_w = self.extra_attention_maps.shape
+                aspect_ratio = tgt_w / tgt_h
+                latent_height = int(round((num_tokens / aspect_ratio) ** 0.5))
+                # latent_width = int(round(num_tokens / latent_height))
+                ref_latent_height = ref_h
+            else:
+                # Fallback to square if no maps provided
+                latent_height = int(round(num_tokens**0.5))
+                ref_latent_height = int(round(self.ref_latents[0].shape[-2] ** 0.5)) if self.ref_latents is not None else 0
+
             downscale_factor = ref_latent_height // latent_height
 
             # Only do xattn for certain layers
@@ -493,7 +522,7 @@ def compute_flow_field(source_frame, target_frame, mesh_warp):
 
     # Stack x and y into image_bchw (batch_size=1, channels=3, height, width)
     # The third channel can be zeros
-    image_bchw = torch.zeros(1, 3, h, w, device=source_frame.image_bchw.device)
+    image_bchw = torch.zeros(1, 3, h, w, device=source_frame.image_bchw.device, dtype=source_frame.image_bchw.dtype)
     image_bchw[0, 0, :, :] = grid_x
     image_bchw[0, 1, :, :] = grid_y
 

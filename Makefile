@@ -37,10 +37,15 @@ install-mamba:
 create-mamba-env:
 	@mamba env create -f environment.yml -n "$(MAMBA_ENV_NAME)"
 	@echo -e $(GREEN)"✅ Mamba env created! ✅"$(NOCOLOR)
+	@mamba run -n "$(MAMBA_ENV_NAME)" pip install --upgrade pip "setuptools==69.5.1" wheel
+	@mamba run -n "$(MAMBA_ENV_NAME)" pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --extra-index-url https://download.pytorch.org/whl/cu118
+	@mamba run -n "$(MAMBA_ENV_NAME)" pip install xformers==0.0.23.post1 fvcore iopath --extra-index-url https://download.pytorch.org/whl/cu118
 	@echo "🏗 Installing PIP dependencies..."
-	@mamba run --live-stream -n "$(MAMBA_ENV_NAME)" pip install --timeout=60 --retries 10 -r requirements_nerfstudio.txt
-	@mamba run --live-stream -n "$(MAMBA_ENV_NAME)" pip install --timeout=60 --retries 10 -r requirements.txt
-	@mamba run --live-stream -n "$(MAMBA_ENV_NAME)" pip install --timeout=60 --retries 10 -e .
+	@mamba run -n "$(MAMBA_ENV_NAME)" pip install --timeout=60 --retries 10 -r requirements_nerfstudio.txt
+	@mamba run -n "$(MAMBA_ENV_NAME)" pip install --timeout=60 --retries 10 -r requirements.txt
+	# Build pytorch3d from source at the end to avoid cache invalidation during experiments
+	@mamba run -n "$(MAMBA_ENV_NAME)" env FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9" pip install --no-build-isolation --no-cache-dir "git+https://github.com/facebookresearch/pytorch3d.git@v0.7.7"
+	@mamba run -n "$(MAMBA_ENV_NAME)" pip install --timeout=60 --retries 10 -e .
 	# Fix a silly issue regarding the openh264 lib:
 	@mamba update -y -n "$(MAMBA_ENV_NAME)" -c conda-forge ffmpeg
 	@echo -e $(GREEN)"✅ Done! All dependencies installed in the $(MAMBA_ENV_NAME) Mamba environment. ✅"$(NOCOLOR)

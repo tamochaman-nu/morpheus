@@ -16,3 +16,4 @@ gradio==5.0.1
 pydantic==2.10.6
 
 loguru==0.7.2
+rembg==2.0.52

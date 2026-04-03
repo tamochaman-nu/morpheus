@@ -5,6 +5,7 @@ services:
     container_name: morpheus_dev
     volumes:
       - .:/app
+      - ./.cache:/root/.cache
     # Set the default shell to use the mamba environment
     command: /bin/bash -l
     stdin_open: true

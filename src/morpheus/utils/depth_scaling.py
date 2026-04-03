@@ -2,6 +2,8 @@ import torch
 
 
 def compute_scale_and_shift(prediction, target, mask):
+    mask = mask.to(dtype=prediction.dtype)
+    target = target.to(dtype=prediction.dtype)
     # system matrix: A = [[a_00, a_01], [a_10, a_11]]
     a_00 = torch.sum(mask * prediction * prediction, (1, 2))
     a_01 = torch.sum(mask * prediction, (1, 2))

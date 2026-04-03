@@ -1,4 +1,53 @@
+# Data and outputs
 data/
+outputs/
+datasets/
+checkpoints/
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
 *.egg-info
 build/
+dist/
+.venv/
+venv/
+env/
+
+# ML Models and weights
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.onnx
+*.weights
+*.bin
+*.model
+
+# Caches and temporary files
+.cache/
+.ipynb_checkpoints/
+core.*
+*.log
+*.swp
+*~
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Environments
+.env
+
+# Archive files
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# Databases
+*.sqlite
+*.db
